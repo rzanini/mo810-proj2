@@ -11,7 +11,20 @@ import time
 
 import numpy as np
 import matplotlib.pyplot as plt
+from skimage.transform import (hough_line, hough_line_peaks,
+                               probabilistic_hough_line)
+from skimage.feature import canny
+from matplotlib import cm
 
+#def ShowPlot(plt):
+#    # Line finding using the Probabilistic Hough Transform
+#    image = plt.figure()
+#    image = plt.imshow(image)
+#    edges = canny(image, 2, 1, 25)
+#    #lines = probabilistic_hough_line(edges, threshold=10, line_length=5,
+#                                     line_gap=3)
+#    plt.show(edges, cmap=cm.gray)
+#
 def main(robotIP, robotPort, motionMode):
 
 	#INIT V-REP SIM
@@ -25,6 +38,9 @@ def main(robotIP, robotPort, motionMode):
         #Get wheel handles
         res2,rightWheel=vrep.simxGetObjectHandle(clientID,'Pioneer_p3dx_rightMotor',vrep.simx_opmode_oneshot_wait)
         res3,leftWheel=vrep.simxGetObjectHandle(clientID,'Pioneer_p3dx_leftMotor',vrep.simx_opmode_oneshot_wait)
+
+        #Get target handle
+        #res4,target=vrep.simxGetObjectHandle(clientID,'Target',vrep.simx_opmode_oneshot_wait)
 
         #Get the sensor handles
         sensorHandles = []
@@ -43,8 +59,6 @@ def main(robotIP, robotPort, motionMode):
             motionLogic = BumperMotion(motionProxy)
         elif(motionMode == 3):
             motionLogic = FuzzyMotion(motionProxy)
-        elif(motionMode == 4):
-            motionLogic = WallFollow(motionProxy)
         else:
             print('Invalid motion mode!!')
             vrep.simxFinish(-1)
@@ -57,7 +71,8 @@ def main(robotIP, robotPort, motionMode):
         NUM_COLORS = 16
         cm = plt.get_cmap('gist_rainbow')
         colors = [cm(1. * i / NUM_COLORS) for i in range(NUM_COLORS)]
-        ignore = 100
+
+        used_sensors = [0,2,3,4,5,7]
 
         plt.scatter(motionLogic.robot.odomY, motionLogic.robot.odomX, s=10, c='PURPLE')
 
@@ -65,15 +80,13 @@ def main(robotIP, robotPort, motionMode):
             #Get the image from the vision sensor
             motionLogic.DoMove()
             for i in range(16):
-                x_pos, y_pos = motionLogic.robot.GetSensorPoint(i)
-                if x_pos != float('inf'):
-                    plt.scatter(y_pos, x_pos, s=1, c=colors[i])
-            if(ignore > 0): ignore -=1
-            else:
-                x_pos, y_pos, _ = motionLogic.robot.GetRobotPosition()
-                plt.scatter(y_pos, x_pos, s=1, c='BLACK')
-
-                plt.scatter(motionLogic.robot.odomY, motionLogic.robot.odomX, s=1, c='GRAY')
+                if(i in used_sensors):
+                    x_pos, y_pos = motionLogic.robot.GetSensorPoint(i)
+                    if x_pos != float('inf'):
+                        plt.scatter(y_pos, x_pos, s=1, c=colors[i])
+            x_pos, y_pos, _ = motionLogic.robot.GetRobotPosition()
+            plt.scatter(y_pos, x_pos, s=1, c='BLACK')
+            plt.scatter(motionLogic.robot.odomY, motionLogic.robot.odomX, s=1, c='GRAY')
 
         vrep.simxFinish(-1)
         plt.gca().invert_xaxis()

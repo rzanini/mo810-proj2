@@ -53,9 +53,9 @@ class FuzzyMotion:
 
     def __init__(self, robotMotion):
         self.robot = robotMotion
-        #self.ruleMaker = ObstacleAvoidanceRules()
-        self.ruleMaker = WallFollowRules()
+        self.ruleMaker = ObstacleAvoidanceRules()
         #self.ruleMaker = WallFollowRules()
+        #self.ruleMaker = GoToGoalRules()
         self.InitFuzzyController()
         print ('Using Fuzzy Controller')
 
@@ -96,7 +96,12 @@ class FuzzyMotion:
         vRight['medium'] = fuzz.trimf(vRight.universe, [1, 2, 3])
         vRight['fast'] = fuzz.trimf(vRight.universe, [2, 4, 4])
 
+        #If GoToGoal rules, need additional inputs (for distance from goal and orientation to goal)
+        #distance = ctrl.Antecedent(np.arange(0, 100, 0.1), 'distance')
+        #orientation = ctrl.Antecedent(np.arange(-pi,+pi, 0.1), 'orientation')
+
         self.inputs = [right_frontal, right_diagonal, right_side, left_frontal, left_diagonal, left_side]
+            #,distance, orientation]
         self.outputs = [vLeft, vRight]
         """
         To help understand what the membership looks like, use the ``view`` methods.
@@ -148,6 +153,7 @@ class FuzzyMotion:
 
     def DoMove(self):
         #START WALKING AT MAX SPEED
+        self.robot.UpdateOdom()
         vLeft=self.v0
         vRight=self.v0
 
@@ -200,6 +206,11 @@ class FuzzyMotion:
         self.simulation.input['left_side'] = left_side
         self.simulation.input['left_diagonal'] = left_diagonal
 
+
+        #distance, orientation = self.robot.GetDiffToGoal()
+        #self.simulation.input['distance'] = distance
+        #self.simulation.input['orientation'] = dist.orientation
+
         #print("Sensor left_frontal = ", left_frontal)
         #print("Sensor left_diagonal = ", left_diagonal)
         #print("Sensor left_side = ", left_side)
@@ -213,8 +224,8 @@ class FuzzyMotion:
         vLeft = self.simulation.output['vLeft']
         vRight = self.simulation.output['vRight']
 
-        print("vRight = ", vRight)
-        print("vLeft = ", vLeft)
+        #print("vRight = ", vRight)
+        #print("vLeft = ", vLeft)
 
         #Move the robot
         self.robot.Move(vLeft,vRight)
@@ -241,45 +252,38 @@ class ObstacleAvoidanceRules:
         #Rules for right wheel based on right sensors
 
         #Regra 0 - se for bater à direita, mova-se para a esquerda devagar
-        rule0_1 = ctrl.Rule(right_frontal['close'], vLeft['back'])
-        rule0_2 = ctrl.Rule(right_frontal['near'], vLeft['back'])
-        rule0_3 = ctrl.Rule(right_frontal['medium'], vLeft['medium'])
-        rule0_4 = ctrl.Rule(right_frontal['far'], vLeft['fast'])
+        rule0_1 = ctrl.Rule(right_frontal['close'] | right_diagonal['close'], vLeft['back'])
+        rule0_2 = ctrl.Rule(right_frontal['near'] | right_diagonal['near'], vLeft['slow'])
+        rule0_3 = ctrl.Rule(right_frontal['medium'] | right_diagonal['medium'], vLeft['medium'])
+        rule0_4 = ctrl.Rule(right_frontal['far'] | right_diagonal['far'], vLeft['fast'])
 
         #Regra 1 - se for bater à esquerda, mova-se para a direita devagar
-        rule1_1 = ctrl.Rule(left_frontal['close'], vRight['back'])
-        rule1_2 = ctrl.Rule(left_frontal['near'], vRight['back'])
-        rule1_3 = ctrl.Rule(left_frontal['medium'], vRight['medium'])
-        rule1_4 = ctrl.Rule(left_frontal['far'], vRight['fast'])
+        rule1_1 = ctrl.Rule(left_frontal['close'] | left_diagonal['close'], vRight['back'])
+        rule1_2 = ctrl.Rule(left_frontal['near'] | left_diagonal['near'], vRight['slow'])
+        rule1_3 = ctrl.Rule(left_frontal['medium'] | left_diagonal['medium'], vRight['medium'])
+        rule1_4 = ctrl.Rule(left_frontal['far'] | left_diagonal['far'], vRight['fast'])
 
-        #Regra 2 - se for bater à esquerda, mova-se para a direita devagar
-        rule2_1 = ctrl.Rule(left_diagonal['close'], vRight['back']%0.6)
-        rule2_2 = ctrl.Rule(left_diagonal['near'], vRight['slow']%0.4)
-        rule2_3 = ctrl.Rule(left_diagonal['medium'], vRight['medium']%0.2)
-        #rule2_4 = ctrl.Rule(left_diagonal['far'], vRight['fast']%0.6)
+        #Regra 2 - se for bater de frente, dê ré
+        rule2_1 = ctrl.Rule(left_frontal['close'] & right_frontal['close'], (vRight['back'], vLeft['back']))
+        rule2_2 = ctrl.Rule(left_frontal['near'] & right_frontal['near'], (vRight['back'], vLeft['back']))
+        rule2_3 = ctrl.Rule(left_frontal['close'] & right_frontal['near'], (vRight['back'], vLeft['medium']))
+        rule2_4 = ctrl.Rule(left_frontal['near'] & right_frontal['close'], (vRight['medium'], vLeft['back']))
+        rule2_5 = ctrl.Rule(left_diagonal['close'] & right_diagonal['close'], (vRight['back'], vLeft['back']))
+        rule2_6 = ctrl.Rule(left_diagonal['near'] & right_diagonal['near'], (vRight['back'], vLeft['back']))
+        #rule2_7 = ctrl.Rule(left_diagonal['close'] & right_diagonal['near'], (vRight['back'], vLeft['medium']))
+        #rule2_8 = ctrl.Rule(left_diagonal['near'] & right_diagonal['close'], (vRight['medium'], vLeft['back']))
 
-        #Regra 3 - se for bater à direita, mova-se para a esquerda devagar
-        rule3_1 = ctrl.Rule(right_diagonal['close'], vLeft['back']%0.6)
-        rule3_2 = ctrl.Rule(right_diagonal['near'], vLeft['slow']%0.4)
-        rule3_3 = ctrl.Rule(right_diagonal['medium'], vLeft['medium']%0.2)
-        #rule3_4 = ctrl.Rule(right_diagonal['far'], vLeft['fast']%0.6)
+        #Regra 3 - se sensor lateral está longe, mantenha médio
+        rule3_1 = ctrl.Rule((left_side['far'] | right_side['far']) & ~(right_frontal['close'] | left_frontal['close']), (vRight['medium'],vLeft['medium']))
+        rule3_2 = ctrl.Rule((left_side['near'] | left_side['medium']) & (right_frontal['close'] | left_frontal['close']), (vRight['back'],vLeft['medium']))
+        rule3_3 = ctrl.Rule((right_side['near'] | right_side['medium']) & (right_frontal['close'] | left_frontal['close']), (vRight['medium'],vLeft['back']))
 
-        #Regra 4 - se for bater à esquerda, mova-se para a direita devagar
-        rule4_1 = ctrl.Rule(left_side['close'], vRight['back']%0.2)
-        rule4_2 = ctrl.Rule(left_side['near'], vRight['slow']%0.2)
-        rule4_3 = ctrl.Rule(left_side['medium'], vRight['medium']%0.2)
-        #rule4_4 = ctrl.Rule(left_side['far'], vRight['fast']%0.2)
+        #rule3_1 = ctrl.Rule(left_side['far'] | right_side['far'], vRight['medium'])
 
-        #Regra 5 - se for bater à direita, mova-se para a esquerda devagar
-        rule5_1 = ctrl.Rule(right_side['close'], vLeft['back']%0.2)
-        rule5_2 = ctrl.Rule(right_side['near'], vLeft['slow']%0.2)
-        rule5_3 = ctrl.Rule(right_side['medium'], vLeft['medium']%0.2)
-        #rule5_4 = ctrl.Rule(right_side['far'], vLeft['fast']%0.1)
-
-
-        rules = [rule0_1, rule0_2, rule0_3, rule0_4, rule1_1, rule1_2, rule1_3, rule1_4, rule2_1, rule2_2, rule2_3, rule3_1, rule3_2, rule3_3,
-                 rule4_1, rule4_2, rule4_3, #rule4_4,
-                 rule5_1, rule5_2, rule5_3]#, #rule5_4]
+        rules = [rule0_1, rule0_2, rule0_3, rule0_4,
+                 rule1_1, rule1_2, rule1_3, rule1_4,
+                 rule2_1, rule2_2, rule2_3, rule2_4,rule2_5,rule2_6,#rule2_7,rule2_8,
+                 rule3_1, rule3_2, rule3_3]
         return rules
 
 

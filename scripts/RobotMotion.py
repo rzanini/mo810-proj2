@@ -14,7 +14,6 @@ class RobotMotion:
         self.rightWheel = right  # instance variable unique to each instance
         self.sensors = sensors
         self.gyro = gyro
-        self.targetPosition = [0,0]
 
         for i in range(16):
             _, _, _, _, _ = vrep.simxReadProximitySensor(self.clientId, self.sensors[i], vrep.simx_opmode_streaming)
@@ -23,26 +22,13 @@ class RobotMotion:
         _,_ = vrep.simxGetObjectOrientation(self.clientId, self.robot, -1, vrep.simx_opmode_streaming)
         _,_ = vrep.simxGetObjectPosition(self.clientId, self.robot, -1, vrep.simx_opmode_streaming)
         _, _, _, _, _ = vrep.simxReadProximitySensor(self.clientId, self.sensors[i], vrep.simx_opmode_streaming)
-        for i in range(10):
-
-            print("t = "+ str(gyro))
-            time.sleep(0.5)
-
-        time.sleep(0.5)
+        _, _ = vrep.simxGetStringSignal(self.clientId, 'gyroData', vrep.simx_opmode_streaming)
+        time.sleep(3)
 
         self.sensorAngles = [i*pi/180 for i in [90, 50, 30, 10, -10, -30, -50, -90 ,-90, -130, -150, -170, 170, 150, 130, 90]]
         self.odomX, self.odomY, self.odomAngle = self.GetRealPose()
         self.leftAngle = 0
         self.rightAngle = 0
-
-    def SetTargetPosition(self, x, y):
-        realX, realY, realAngle = self.GetRealPose()
-        deltaX = x - realX;
-        deltaY = y - realY;
-        targetAngle = np.arctan(deltaY/deltaX)
-        self.targetPosition = [x,y,targetAngle]
-        self.targetDistance = sqrt((deltaX)^2 + (deltaY)^2)
-        self.targetOrientation = targetAngle - realAngle
 
     def GetRealPose(self):
         error, pos = vrep.simxGetObjectPosition(self.clientId, self.robot, -1, vrep.simx_opmode_streaming)
@@ -64,22 +50,13 @@ class RobotMotion:
         return [X, Y, angle]
 
     def GetEstimatedPose(self):
+
         return [self.odomX, self.odomY, self.odomAngle]
 
     def Move(self, left, right):
         # START WALKING AT MAX SPEED
         vrep.simxSetJointTargetVelocity(self.clientId, self.leftWheel, left, vrep.simx_opmode_streaming)
         vrep.simxSetJointTargetVelocity(self.clientId, self.rightWheel, right, vrep.simx_opmode_streaming)
-
-
-    def MoveByAngle(self, w, v):
-        wNorm = (w * pi) - pi/2
-        vL = v+(RobotMotion.L*wNorm)/(RobotMotion.R)
-        vR = v-(RobotMotion.L*wNorm)/(RobotMotion.R)
-        print('w = ', wNorm)
-        print('vL = ', vL)
-        print('vR = ', vR)
-        self.Move(vL, vR)
 
     def Stop(self):
         # TARGET VELOCITY
@@ -91,6 +68,10 @@ class RobotMotion:
         res, robotPosition = vrep.simxGetObjectPosition(self.clientId, self.robot, -1, vrep.simx_opmode_streaming)
         return robotPosition
 
+    def GetGoalPosition(self):
+        res, goalPosition = vrep.simxGetObjectPosition(self.clientId, self.goal, -1, vrep.simx_opmode_streaming)
+        return goalPosition
+
     def GetRobotOrientation(self):
         res, robotOrientation = vrep.simxGetObjectOrientation(self.clientId, self.robot, -1, vrep.simx_opmode_streaming)
         return robotOrientation
@@ -101,6 +82,20 @@ class RobotMotion:
         distance = sqrt(sum([x ** 2 for x in detectedPoint]))
         # distance = detectedPoint[2]
         return detectionState, distance
+
+    def GetDiffToGoal(self):
+        pos = self.GetRobotPosition()
+        goal = self.GetGoalPosition()
+        realAngle = self.GetRobotOrientation()
+        x = goal[0], y = goal[1]
+        realX = pos[0], realY = pos[1]
+        deltaX = x - realX;
+        deltaY = y - realY;
+        targetAngle = np.arctan(deltaY/deltaX)
+        self.targetPosition = [x,y,targetAngle]
+        self.targetDistance = sqrt((deltaX)^2 + (deltaY)^2)
+        self.targetOrientation = targetAngle - realAngle
+        return self.targetDistance, self.targetOrientation
 
     def GetSensorPoint(self, i):
         orient = self.GetRobotOrientation()
@@ -118,6 +113,7 @@ class RobotMotion:
         y_pos = robot_y + y_delta
         return [x_pos, y_pos]
 
+    #Function for updating the odometer of the robot
     def UpdateOdom(self):
         erro, new_l_angle = vrep.simxGetJointPosition(self.clientId, self.leftWheel, vrep.simx_opmode_streaming);
         if erro != 0:
@@ -138,17 +134,22 @@ class RobotMotion:
         self.rightAngle = new_r_angle
         self.leftAngle  = new_l_angle
 
+        #Correct the angle signal (0 to 2pi)
         if rightDiff >  pi: rightDiff -= 2*pi
         if rightDiff < -pi: rightDiff += 2*pi
         if leftDiff  >  pi:  leftDiff -= 2*pi
         if leftDiff  < -pi:  leftDiff += 2*pi
 
-        radius = 0.195/2
-        angleDiff  = radius*(rightDiff - leftDiff)/0.356
-        linearDiff = radius* (rightDiff + leftDiff)/2
+        angleDiff  = RobotMotion.R*(rightDiff - leftDiff)/0.356
+        linearDiff = RobotMotion.R*(rightDiff + leftDiff)/2
 
-        self.odomX += linearDiff * cos(self.odomAngle + angleDiff / 2)
-        self.odomY += linearDiff * sin(self.odomAngle + angleDiff / 2)
-        self.odomAngle += angleDiff
+        #Get data from gyroscope
+        erro , gyroData= vrep.simxGetStringSignal(self.clientId, 'gyroData', vrep.simx_opmode_streaming)
+        gyroData = vrep.simxUnpackFloats(gyroData)
+        _, _, gyroAngle= gyroData
+
+        self.odomX += linearDiff * cos((self.odomAngle + gyroAngle )/ 2)
+        self.odomY += linearDiff * sin((self.odomAngle + gyroAngle )/ 2)
+        self.odomAngle = gyroAngle
         while self.odomAngle >  pi:  self.odomAngle -= 2*pi
         while self.odomAngle < -pi:  self.odomAngle += 2*pi
